@@ -157,9 +157,9 @@ class Cluster:
                 return True
 
             def do_GET(self):
-                if not self._auth():
-                    return
                 path = urlparse(self.path).path
+                if path == "/status" and not self._auth():
+                    return
                 if path == "/status":
                     self._send(200, cluster.status())
                 elif path in ("/", "/dashboard"):

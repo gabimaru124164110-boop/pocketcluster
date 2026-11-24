@@ -16,7 +16,7 @@ td,th{text-align:left;padding:6px 4px;font-size:14px}
 <div class="card"><div id="sum">connecting...</div><div class="bar"><div id="fill"></div></div></div>
 <div class="card"><table><thead><tr><th>Worker</th><th>Host</th><th>State</th><th>Tasks done</th></tr></thead><tbody id="rows"></tbody></table></div>
 <script>
-const tok = new URLSearchParams(location.search).get("token") || "";
+const tok = new URLSearchParams(location.search).get("token") || prompt("Cluster token:") || "";
 const esc = t => String(t).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 async function tick() {
   const sum = document.getElementById("sum");
