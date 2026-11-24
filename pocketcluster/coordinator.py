@@ -23,16 +23,19 @@ class Cluster:
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
     # ---- public API ----
-    def map(self, fn, items, timeout=None):
+    def map(self, fn, items, timeout=None, chunksize=1):
         src = textwrap.dedent(inspect.getsource(fn))
         name = fn.__name__
         job = uuid.uuid4().hex[:8]
         ids = []
+        items = list(items)
+        many = chunksize > 1
+        units = [items[i:i + chunksize] for i in range(0, len(items), chunksize)] if many else items
         with self._cv:
-            for i, item in enumerate(items):
+            for i, item in enumerate(units):
                 tid = f"{job}-{i}"
                 self._tasks[tid] = {
-                    "name": name, "src": src, "item": item,
+                    "name": name, "src": src, "item": item, "many": many,
                     "state": "queued", "worker": None, "deadline": 0,
                     "result": None, "error": None,
                 }
@@ -50,6 +53,8 @@ class Cluster:
         for t in done:
             if t["error"]:
                 raise RuntimeError("task failed on a worker:\n" + t["error"])
+        if many:
+            return [r for t in done for r in t["result"]]
         return [t["result"] for t in done]
 
     def status(self):
@@ -91,7 +96,7 @@ class Cluster:
                 t["state"] = "running"
                 t["worker"] = worker
                 t["deadline"] = time.time() + self.lease
-                return {"id": tid, "name": t["name"], "src": t["src"], "item": t["item"]}
+                return {"id": tid, "name": t["name"], "src": t["src"], "item": t["item"], "many": t["many"]}
         return None
 
     def _finish(self, tid, result, error):

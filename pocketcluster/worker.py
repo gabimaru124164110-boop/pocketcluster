@@ -19,7 +19,18 @@ def _post(url, token, obj, timeout=30):
 def run_worker(base, token="pocket", poll=0.5):
     """Join a coordinator and process tasks forever."""
     base = base.rstrip("/")
-    me = _post(base + "/register", token, {"host": socket.gethostname()})["worker"]
+    while True:
+        try:
+            me = _post(base + "/register", token, {"host": socket.gethostname()})["worker"]
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                print("bad token, exiting")
+                return
+            time.sleep(2)
+        except (urllib.error.URLError, OSError):
+            print("waiting for coordinator...")
+            time.sleep(2)
     print(f"worker {me} joined {base}")
     while True:
         try:
@@ -40,7 +51,11 @@ def run_worker(base, token="pocket", poll=0.5):
         try:
             ns = {}
             exec(task["src"], ns)
-            result = ns[task["name"]](task["item"])
+            fn = ns[task["name"]]
+            if task.get("many"):
+                result = [fn(x) for x in task["item"]]
+            else:
+                result = fn(task["item"])
             json.dumps(result)
             payload = {"id": task["id"], "result": result, "error": None}
         except Exception:

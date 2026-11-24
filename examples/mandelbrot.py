@@ -60,6 +60,7 @@ def main():
     p.add_argument("--iters", type=int, default=120)
     p.add_argument("--workers", type=int, default=1, help="wait for this many workers")
     p.add_argument("--token", default="pocket")
+    p.add_argument("--chunk", type=int, default=8, help="rows per task")
     p.add_argument("--out", default="mandelbrot.png")
     a = p.parse_args()
 
@@ -77,7 +78,7 @@ def main():
     ]
     n_workers = cluster.status()["workers_online"]
     t0 = time.time()
-    rows = cluster.map(render_row, jobs)
+    rows = cluster.map(render_row, jobs, chunksize=a.chunk)
     dt = time.time() - t0
     print(f"Rendered {a.width}x{a.height} in {dt:.1f}s with {n_workers} workers")
     write_png(a.out, [[color(n, a.iters) for n in row] for row in rows])
