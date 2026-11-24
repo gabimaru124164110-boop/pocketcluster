@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocketcluster"
+version = "0.1.0"
+description = "Turn old Android phones into a tiny compute cluster. Pure Python, zero dependencies."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [{name = "gabimaru124164110-boop"}]
+dependencies = []
+
+[project.scripts]
+pocketcluster = "pocketcluster.__main__:main"
+
+[tool.setuptools]
+packages = ["pocketcluster"]

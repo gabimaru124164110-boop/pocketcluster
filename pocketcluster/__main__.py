@@ -14,4 +14,5 @@ def main():
         run_worker(args.url, args.token)
 
 
-main()
+if __name__ == "__main__":
+    main()
