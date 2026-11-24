@@ -13,7 +13,7 @@ On one phone, write a script:
         return n * n
 
     cluster = Cluster(token="my-secret")
-    print(cluster.map(square, list(range(100))))
+    print(cluster.map(square, list(range(100)), chunksize=8))
 
 On every other phone (or extra Termux sessions):
 
@@ -22,9 +22,26 @@ On every other phone (or extra Termux sessions):
 Workers pull tasks, compute, and send results back. If a phone dies
 mid-task, the task is re-queued automatically.
 
-## Demo: Mandelbrot across phones
+Live dashboard: open http://COORDINATOR_IP:8765/?token=my-secret in a browser.
+
+## Demos
 
     PYTHONPATH=. python examples/mandelbrot.py --workers 4
+    PYTHONPATH=. python examples/failover_demo.py
+
+## Benchmark
+
+Mandelbrot 640x480, 200 iterations, 4 rows per task, median of 3 runs,
+all workers on a single phone (so they share its cores and heat budget):
+
+    workers   time    speedup
+    1         7.5s    1.0x
+    2         3.9s    1.9x
+    4         2.8s    2.7x
+
+Batching matters: sending one row per task made a single worker 2.4x
+slower because of per-task HTTP overhead. Use chunksize. The first run
+after a cold start is slower; reproduce with benchmarks/bench.sh.
 
 ## Notes
 

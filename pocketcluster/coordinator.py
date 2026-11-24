@@ -5,6 +5,9 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+from .dashboard import PAGE
 
 
 class Cluster:
@@ -18,6 +21,7 @@ class Cluster:
         self._pending = []
         self._tasks = {}
         self._workers = {}
+        self._completed = 0
         self._server = ThreadingHTTPServer((host, port), self._make_handler())
         self.port = self._server.server_address[1]
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
@@ -27,10 +31,13 @@ class Cluster:
         src = textwrap.dedent(inspect.getsource(fn))
         name = fn.__name__
         job = uuid.uuid4().hex[:8]
-        ids = []
         items = list(items)
         many = chunksize > 1
-        units = [items[i:i + chunksize] for i in range(0, len(items), chunksize)] if many else items
+        units = (
+            [items[i:i + chunksize] for i in range(0, len(items), chunksize)]
+            if many else items
+        )
+        ids = []
         with self._cv:
             for i, item in enumerate(units):
                 tid = f"{job}-{i}"
@@ -60,11 +67,22 @@ class Cluster:
     def status(self):
         with self._lock:
             now = time.time()
-            states = [t["state"] for t in self._tasks.values()]
+            tasks = list(self._tasks.values())
+            states = [t["state"] for t in tasks]
+            busy = {t["worker"] for t in tasks if t["state"] == "running"}
+            workers = [
+                {"id": wid, "host": w["host"], "online": now - w["seen"] < 15,
+                 "busy": wid in busy, "done": w["done"]}
+                for wid, w in self._workers.items()
+                if now - w["seen"] < 300
+            ]
             return {
-                "workers_online": sum(1 for s in self._workers.values() if now - s < 15),
+                "workers_online": sum(1 for w in workers if w["online"]),
                 "queued": states.count("queued"),
                 "running": states.count("running"),
+                "done": states.count("done"),
+                "completed_total": self._completed,
+                "workers": workers,
             }
 
     def close(self):
@@ -78,15 +96,16 @@ class Cluster:
                 t["state"] = "queued"
                 self._pending.append(tid)
 
-    def _register(self):
+    def _register(self, host="?"):
         wid = uuid.uuid4().hex[:6]
         with self._lock:
-            self._workers[wid] = time.time()
+            self._workers[wid] = {"host": str(host)[:40], "seen": time.time(), "done": 0}
         return wid
 
     def _claim(self, worker):
         with self._cv:
-            self._workers[worker] = time.time()
+            w = self._workers.setdefault(worker, {"host": "?", "seen": 0, "done": 0})
+            w["seen"] = time.time()
             self._requeue_expired()
             while self._pending:
                 tid = self._pending.pop(0)
@@ -96,7 +115,8 @@ class Cluster:
                 t["state"] = "running"
                 t["worker"] = worker
                 t["deadline"] = time.time() + self.lease
-                return {"id": tid, "name": t["name"], "src": t["src"], "item": t["item"], "many": t["many"]}
+                return {"id": tid, "name": t["name"], "src": t["src"],
+                        "item": t["item"], "many": t["many"]}
         return None
 
     def _finish(self, tid, result, error):
@@ -107,6 +127,10 @@ class Cluster:
             t["state"] = "done"
             t["result"] = result
             t["error"] = error
+            self._completed += 1
+            w = self._workers.get(t["worker"])
+            if w is not None:
+                w["done"] += 1
             self._cv.notify_all()
 
     def _make_handler(self):
@@ -125,7 +149,9 @@ class Cluster:
                 self.wfile.write(body)
 
             def _auth(self):
-                if self.headers.get("X-Token") != cluster.token:
+                qs = parse_qs(urlparse(self.path).query)
+                given = self.headers.get("X-Token") or (qs.get("token") or [""])[0]
+                if given != cluster.token:
                     self._send(401, {"error": "bad token"})
                     return False
                 return True
@@ -133,8 +159,16 @@ class Cluster:
             def do_GET(self):
                 if not self._auth():
                     return
-                if self.path == "/status":
+                path = urlparse(self.path).path
+                if path == "/status":
                     self._send(200, cluster.status())
+                elif path in ("/", "/dashboard"):
+                    body = PAGE.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                 else:
                     self._send(404, {"error": "not found"})
 
@@ -148,7 +182,7 @@ class Cluster:
                     self._send(400, {"error": "bad json"})
                     return
                 if self.path == "/register":
-                    self._send(200, {"worker": cluster._register()})
+                    self._send(200, {"worker": cluster._register(data.get("host", "?"))})
                 elif self.path == "/task":
                     self._send(200, {"task": cluster._claim(data.get("worker", ""))})
                 elif self.path == "/result":
